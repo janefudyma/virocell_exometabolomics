@@ -4,11 +4,11 @@ Author: Jane Fudyma (jdfudyma@ucdavis.edu / janefudyma@email.arizona.edu)
 
 Date: 9/24/2020
 
-Title: Virocell Metabolomics
+Title: Virocell Exometabolomics
 
 ----
 
--This RMD script is part of a collaboration with Dr. Cristina Howard-Varona's research from Ohio State University (2019-2020) 
+-This RMD script is part of a collaboration with Dr. Cristina Howard-Varona's research from Ohio State University (2019-2020), exploring the exometabolome of two phage infected marine pseudoalteromonas
 
 -Direct Inject FTICR-MS (negative mode) data generated at University of Arizona (PI Malak Tfaily) was ran through Formularity (Tolic et al. 2017) for formula assignments. The masses from each sample were also ran through Cytoscape with MetaNetter 2.0 plugin.
 
