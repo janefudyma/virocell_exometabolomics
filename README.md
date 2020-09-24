@@ -1,10 +1,10 @@
 ----
 
-## Author: Jane Fudyma (jdfudyma@ucdavis.edu / janefudyma@email.arizona.edu)
+Author: Jane Fudyma (jdfudyma@ucdavis.edu / janefudyma@email.arizona.edu)
 
-## Date: 9/24/2020
+Date: 9/24/2020
 
-## Title: Virocell Metabolomics
+Title: Virocell Metabolomics
 
 ----
 
