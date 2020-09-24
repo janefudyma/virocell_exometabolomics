@@ -1,0 +1,364 @@
+---
+title: "Virocell Exometabolome"
+author: "Jane Fudyma"
+email: "janefudyma@email.arizona.edu / jdfudyma@ucdavis.edu"
+date: "7/31/2020"
+output: html_document
+---
+
+1. Load library and functions for analysis
+```{r librarys, warning=FALSE}
+shhh <- suppressPackageStartupMessages
+
+shhh(library(ggplot2))
+shhh(library(assertthat))
+shhh(library(reshape2))
+shhh(library(plyr))
+shhh(library(ggpubr))
+shhh(library(reticulate))
+shhh(library(ggridges))
+shhh(library(stats))
+shhh(library(factoextra))
+shhh(library(ggrepel))
+shhh(library(car))
+source('countCompoundTypes.R')
+source('normalizeMassNotation.R')
+source('readFTICR.R')
+#functions countCompoundTypes.R, 'normalizeMassNotation.R', and readFTICR.R can be found here: "https://github.com/ktoddbrown/FTICR_Processing/tree/master/R"
+#Reference: Todd Brown, K. 2015, FTICR_Processing, GitHub Repository: https://github.com/ktoddbrown/FTICR_Processing
+```
+
+2. Prepare dataframes for PCA, GFE, %Class
+
+#import `Report file` and remove outliers defined by pearsons correlation
+
+#`Report file` generated using Formularity (Tolic et al. 2017 - https://doi.org/10.1021/acs.analchem.7b03318)
+
+#output is `Report_allreps.csv` which will be used for GFE and %Class in step 5
+```{python}
+import pandas as pd
+
+df = pd.read_csv('Report_renamedforplots.csv')
+df=df.drop(['P-poor_HP1_T60_R2','P-rich_HS2_T30_R4','P-rich_C_T60_R4'], axis=1)
+df.to_csv('Report_allreps.csv', index = False) #Report used for GFE and %Class in step 5
+```
+
+##prep dataframe for PCA - normalize intenisty within each sample to get "relative abundance", average across replicates within a treatment time and infection
+
+##output file `Report_NormalizedMeanIntensity_RepsAveraged.csv` is used for PCA only 
+```{python}
+df1 = df.iloc[:,14:] #intensities by sample rep are in columns 14 and on
+df2 = (df1.div(df1.sum(axis=0).T))*100 #averaging across column intnesity sum
+df3 = pd.concat([df.iloc[:,0:14],df2], axis=1, sort=False) #merging if needed report with all normalized intensities (not averaged)
+
+#averaging across replicates
+columns = df3.iloc[:,14:].columns
+
+#creating a new list called prefix columns, taking the column names defined in "columns" and removing the rep (i.e. -3), this gives the prefix columns to merge replicates
+
+prefixcolumns = []
+
+for column in columns:
+  if column.endswith('_R1'): #all replicates are named _R1 through _R4
+    prefixcolumns.append(column[:-3])
+#print(prefixcolumns)
+
+#getting the original dataframe
+df4 = df.iloc[:,:14]
+#df4.columns
+
+#iterate through columns and grab everything that starts with that prefix and assigns it to a new df called l - then average each of these across row (axis = 1) to get averaged mass intensity within each repicate
+for p in prefixcolumns:
+  l = [x for x in df.columns if x.startswith(p)]
+  df4[p]=df3.loc[:,l].mean(axis=1) #mean - average, axis 1 is columns, avg rows in column (axis 0 is the rows)
+
+df4.to_csv('Report_NormalizedMeanIntensity_RepsAveraged.csv',index=False)  #create datatable for PCA
+```
+
+3. Principal component analysis (PCA)
+
+#First we want to visualize if and what exeprimental variables are driving differences within our dataset that we can then use for further downstream analysis. PCA plots allow us to visualize these groupings and look at explained variance between metabolite abundance and specific experimental drivers. 
+
+##Important to note: Metabolomics datasets generate a significant amount of zeros. PCA can try and "overfit" variance when trying to incorporate zeros. Good practice is to drop masses if there are greater than 50% of zeros across all samples, which is what we did below.
+```{python}
+import numpy as np 
+
+df=pd.read_csv('Report_NormalizedMeanIntensity_RepsAveraged.csv')
+df=df.drop(['P-poor_Media_T0','P-rich_Media_T0'], axis=1) #removing blanks
+df1=df.iloc[:,14:] #grabbing averaged mass intensities under samples
+df1['Mass']=df['Mass'] #adding back identified "mass"
+
+#dealing with zeros
+df1=df1.replace(0,np.nan)
+df1.dropna(axis=0, thresh=9, inplace=True) # thresh == require 'X' non-NA values. We had 18 samples thus removed 50%, adjust depending on your dataset
+df1=df1.replace(np.nan,0)
+
+#prepares data for PCA, samples should be in rows, masses (or variable comparing) should be in columns
+df1=df1.set_index('Mass').T 
+df1
+```
+
+```{r}
+main <- as.data.frame(py$df1)
+ind_active <- main[c(1:18),] #have to change depending on how many samples you have
+
+# calculate PCA with active individuals
+pca_active <- prcomp(ind_active, center = TRUE, scale.=TRUE)
+
+# extract eigenvalues/variances
+eigen <- get_eigenvalue(pca_active)
+# extract % of explained variance
+pc1 <- paste0('PC1 (',round(eigen$variance.percent[1],digits=2),'% exp. var.)')
+pc2 <- paste0('PC2 (',round(eigen$variance.percent[2],digits=2),'% exp. var.)')
+
+# extract coordinate for active individuals
+pca_results_active <- get_pca_ind(pca_active)
+
+#pca_results_active$coord
+pca2d_result_active_ind <- as.data.frame(pca_results_active$coord[,c(1,2)])
+pca2d_result_active_ind 
+```
+
+#for plotting - add phenotypic data for each sample for grouping
+```{python}
+pca2d_result_active_ind =r.pca2d_result_active_ind 
+pca2d_result_active_ind= pca2d_result_active_ind.reset_index()
+pca2d_result_active_ind['media']=pca2d_result_active_ind['index'].str.split('_').str[0]
+pca2d_result_active_ind['infection']=pca2d_result_active_ind['index'].str.split('_').str[1]
+pca2d_result_active_ind['time']=pca2d_result_active_ind['index'].str.split('_').str[-1]
+pca2d_result_active_ind['sample']=pca2d_result_active_ind['media']+' '+pca2d_result_active_ind['infection']+' '+pca2d_result_active_ind['time']
+pca2d_result_active_ind
+```
+
+```{r}
+pca2d_result_active_ind = py$pca2d_result_active_ind
+#can add phenotypic data to this dataframe for plotting at this step - I generally do this in python (added media, infection, time to each sample and its assigned principle component)
+
+##plot
+pca <-  ggplot(mapping = aes(x, y)) +
+  stat_conf_ellipse(data=pca2d_result_active_ind ,aes(x=Dim.1, y=Dim.2, fill=media, color=media), alpha = 0.6, geom='polygon') +
+  geom_point(data=pca2d_result_active_ind, aes(x=Dim.1, y=Dim.2, col=media, shape=infection), size=3, show.legend = TRUE) +
+  geom_text_repel(data=pca2d_result_active_ind, aes(x=Dim.1, y=Dim.2,col=media), label=pca2d_result_active_ind$index, size=4, show.legend = FALSE) + 
+  labs(title = "PCA",x= pc1, y=pc2) + #ylim(-12,7) + xlim(-15,25) +
+  theme_linedraw(base_size = 16) + 
+  theme( legend.text = element_text(size =16, face="bold"), legend.title = element_text(size=18,face="bold"),
+         legend.key.size = unit(1, "cm"), legend.key.width = unit(1,"cm"), 
+         axis.title.x = element_text(size=18,face="bold"), axis.title.y = element_text(size=18,face="bold"),
+         plot.title = element_text(size=18,face="bold")) +
+  scale_colour_manual(name="media",values=c('darkgreen', 'darkslategrey')) +
+  scale_fill_manual(name="media",values=c('darkgreen', 'darkslategrey')) +
+  guides(fill = guide_legend(override.aes = list(shape = NA))) +
+  scale_shape_discrete(name="Infection") 
+
+print(pca)
+#ggsave('PCA.pdf', device = 'pdf', dpi=300, pca)
+```
+
+
+4. Network Heterogeneity
+
+#Network heterogeneity is performed by Cytoscape (version 3.4.0) using Network Analysis function. The network heterogeneity values are manually entered into a table and then plotted with R. 
+
+#Import `Network_Analysis_Table.csv` which was manually generated by compiling Network Heterogeneity values from each sample ran through cytoscape
+
+#Importing table/dropping outliers/adding phenotypic data
+```{python}
+df = pd.read_csv('Network_Analysis_Table.csv', index_col='Samples')
+df=df.drop(['P-poor_HP1_T60_R2','P-rich_HS2_T30_R4','P-rich_C_T60_R4'])
+df=df.reset_index()
+#adding the phenotypic column for plots
+df['media']=df['Samples'].str.split('_').str[0]
+df['infection']=df['Samples'].str.split('_').str[1]
+df['time']=df['Samples'].str.split('_').str[-2]
+df['sample']=df['media']+' '+df['infection']+' '+df['time']
+```
+
+#checking distribution of dataframe for statistics
+```{r}
+neta = py$df
+
+#check if data is normalized for t.test or wilcox.test
+
+shapiro.test(neta$Network_Heterogeneity)
+
+#From the output, if the the p-value is > 0.05 that implies that the distribution of the data are not significantly different from normal distribution. In other words, we can assume the normality.
+#if the p value is < 0.05, then the null hypothesis is rejected and there is evidence that the data tested are not normally distributed. 
+
+#our results suggest not normally distributed and thus will use wilcox
+```
+
+#and to plot..
+```{r}
+netplot <- ggplot(neta, aes(x=infection, y=Network_Heterogeneity, fill=media)) + geom_boxplot(color="black") + theme_minimal() + scale_fill_manual(values=alpha(c('darkgreen', 'darkslategrey'),0.9)) +
+  geom_boxplot() + stat_compare_means(method='wilcox',label.x=1.25, size = 3) #using nonparametric tests
+netplot
+#ggsave('All_networkheterogeneity_media.pdf', device = 'pdf', dpi=300, netplot)
+```
+
+
+5.Calculating Gibbs Free Energy values and class composition relative abundance (%) 
+
+#GFE and class assignment per mass are based on the assigned chemical formula for that mass, generated as a report file by Formularity (Tolic et al. 2017 https://doi.org/10.1021/acs.analchem.7b03318). 
+
+#I am using the functions readFTICR.R and countCompoundTypes.R from K. Todd Brown github repository (https://github.com/ktoddbrown/FTICR_Processing), which both manipulate the report file to peform further analysis.
+
+##readFTICR takes the report file and performs analysis (using function 'normalizeMassNotation.R' - also from K. Todd Brown repository) based on molecular formula to calculate OtoC, HtoC, Double Bond Energy, Al, Almod for each mass. GFE for each mass is then calculated based on the readFTICR output file [puts data in better format to do so]. Further, chemical class composition can then be calculated based off OtoC and HtoC ratios from the readFTICR output file and plotted against GFE to understand GFE as it relates to chemical composition. Input file `Report_allreps.csv`. Output file `Data_for_plots.csv`
+
+##countCompoundTypes is similar to readFTICR, but the output file is differnt. It assigns chemical classification using OtoC and HtoC ratios and generates a file that gives the counts of compound types found in each class per sample. Class composition relative abundances is based on this dataframe as percentage of the total peaks per sample. Input file `Report_allreps.csv`. Output file `countOutput_percentages.csv`
+
+5A. Gibbs Free Energy 
+```{python}
+#using readFTICR function all samples must end with '_sample' so function can grab the samples but not the mass and elements 
+df=pd.read_csv('Report_allreps.csv') #report generated in step 1 of this script
+new_names = [(i,i+'_sample') for i in df.iloc[:, 14:].columns.values]
+df.rename(columns = dict(new_names), inplace=True)
+df.to_csv('Report_allreps_newsuffix.csv',index=False)
+```
+
+#assign an inputFile (the one with new suffixes) for function to read
+```{r}
+inputFile <- 'Report_allreps_newsuffix.csv'
+```
+
+```{r}
+dataf <- readFTICR(inputFile, massHeader='Mass', elementKey = list(C='C', H='H', O='O', N='N', S='S', P='P'), sampleRegStr='_sample', samplesToRead=1:76) #adjust the number of samples you have per dataset
+
+#calculating NOSC and then GFE using formulas from Boye et al. (2018) - https://doi.org/10.3389/fenvs.2018.00015.
+dataf['NOSC'] = -((4*dataf['C'] + dataf['H'] - 3*dataf['N'] - 2*dataf['O'] + 5*dataf['P'] - 2*dataf['S'])/(dataf['C']))+4
+dataf['GFE']= -(28.5*dataf['NOSC'])+60.3
+```
+
+#Assigning putative chemical classes based on their OtoC and HtoC ratios, then adding phenotypic data for plots (i.e. media, infection, time and sample)
+
+#This data table is what is used to plot GFE alone, as well as GFE vs Compound Class.
+```{python}
+#Van Krevelen ratio assignments adapted from Kim et al., 2003 (https://doi.org/10.1021/ac034415p) and Tfaily et al. 2017 (https://doi.org/10.1016/j.aca.2017.03.031)
+
+df=r.dataf
+
+conditions=[
+(df['OtoC'].between(0,0.3))&(df['HtoC'].between(1.5,2.5)),
+(df['OtoC'].between(0,0.125))&(df['HtoC'].between(0.8,1.5)),
+(df['OtoC'].between(0,0.95))&(df['HtoC'].between(0.2,0.8)),
+(df['OtoC'].between(0.3,0.55))&(df['HtoC'].between(1.5,2.3)),
+(df['OtoC'].between(0.55,0.7))&(df['HtoC'].between(1.5,2.2)),
+(df['OtoC'].between(0.7,1.5))&(df['HtoC'].between(1.5,2.5)),
+(df['OtoC'].between(0.125,0.65))&(df['HtoC'].between(0.8,1.5)),
+(df['OtoC'].between(0.65,1.1))&(df['HtoC'].between(0.8,1.5))]
+  
+choices=['Lipid','Unsaturated Hydrocarbon','Condensed Hydrocarbon','Peptide','AminoSugar','Carbohydrate','Polyphenol','Carboxylated/Oxygen_Rich']
+
+df['class']=np.select(conditions,choices,default='Other')
+df['media']=df['sample'].str.split('_').str[0]
+df['infection']=df['sample'].str.split('_').str[1]
+df['time']=df['sample'].str.split('_').str[2]
+df['media_infection']=df['media']+'_'+df['infection']
+df['Sample1']=df['media']+' '+df['infection']+' '+df['time']
+
+df.to_csv('Data_for_plots.csv',index=False) #data table to use in GFE and GFE vs chemical class
+```
+
+#plot GFE and GFE vs. chemical class
+```{r}
+dataf <- read.csv('Data_for_plots.csv')
+qqPlot(dataf$GFE) # check distribution - non normally distributed 
+
+#boxplots - GFE with wilcoxon stats
+gibbs <- ggplot(dataf, aes(x=media, y=GFE, fill=media)) + geom_boxplot(color="black") +     
+        theme_minimal() + geom_boxplot() +
+        stat_compare_means(method = 'wilcox', label.x=1.25, size = 4) +
+        scale_fill_manual(values=alpha(c('darkgreen', 'darkslategrey'),0.9))
+gibbs
+
+#densityplots - GFE
+density <- ggplot(dataf, aes(x=GFE, y=media, fill=media)) + geom_density_ridges(alpha = 0.8) +
+        theme_minimal() + scale_fill_manual(values=c('darkgreen', 'darkslategrey'))
+density
+
+#boxplots - GFE vs compound class
+class3 <- ggplot(dataf, aes(x=media, y=GFE, fill=media)) + geom_jitter(alpha = 0.1, shape = 16)+
+        geom_boxplot() + scale_fill_manual(values=alpha(c('darkgreen', 'darkslategrey'),0.9)) +
+        facet_wrap(~class, scales = "free_y") +  theme_minimal() +
+        stat_compare_means(method = "wilcox.test", aes(label = ..p.signif..), label.x = 1.4) 
+class3
+```
+
+
+5B. Class composition relative abundances (%)
+
+#Create `countOutput.csv`
+
+#inputFile was set at the beginning of step 4A. 
+
+#The `fileOut=` parameter is the path where `countOuput.csv` will be created - giving counts of classes per sample
+
+#CountCompoundTypes from K. Todd Brown github repository (https://github.com/ktoddbrown/FTICR_Processing)
+
+#Since we are working with a marine system, the countCompoundTypes function from K Todd Brown was edited when running this script to change certain class names to fit ecosystem DOM composition [protein -> peptide] [lignin-> polyphenol] [tannin -> Carboxylated_Oxygen_Rich]
+```{r makecounts}
+myCounts <- countCompoundTypes(fileIn=inputFile, fileOut='countOutput.csv', massHeader='Mass', sampleRegStr='_sample')#, verbose=TRUE) 
+myCounts <-myCounts[!is.na(myCounts$sample),]
+numSamples <- length(unique(myCounts$sample))
+samples <- unique(myCounts$sample)
+samples
+```
+
+#Calculate percentages to normalize realtive abundance to total peaks in sample
+```{r calc_percentages}
+df <- read.csv('countOutput.csv')
+df$pLipids = (df$Lipids*100)/df$total_peaks
+df$pUnSaturated_Hydrocarbons = (df$UnSaturated_Hydrocarbons*100)/df$total_peaks
+df$pCondensed_Hydrocarbons = (df$Condensed_Hydrocarbons*100)/df$total_peaks
+df$pPeptides = (df$Peptides*100)/df$total_peaks
+df$pAmino_Sugars = (df$Amino_Sugars*100)/df$total_peaks
+df$pCarbohydrates = (df$Carbohydrates*100)/df$total_peaks
+df$pPolyphenol = (df$Polyphenols*100)/df$total_peaks
+df$pCarboxylated_Oxygen_Rich = (df$Carboxylated_Oxygen_Rich*100)/df$total_peaks
+df$pCompounds_NA = (df$Compounds_NA*100)/df$total_peaks
+#df$Molecular_total=df$CHO + df$CHON + df$CHOS + df$CHOP + df$CHONS + df$CHONP + df$CHOSP + df$CHONSP
+df$Compounds_total=df$Lipids + df$UnSaturated_Hydrocarbons + df$Condensed_Hydrocarbons + df$Peptides + df$Amino_Sugars + df$Carbohydrates + df$Polyphenols + df$Carboxylated_Oxygen_Rich
+cols <- c(2,3,32:42)
+df1 <- df[,cols]
+df1 <- df1[!is.na(df1$sample), ]
+write.csv(df1,file='countOutput_percentages.csv',row.names = FALSE)
+```
+
+##melt for plotting, checking stats, and plot
+```{r}
+df <- read.csv('countOutput_percentages.csv')
+
+# subset % countOutput
+subset_classes <- df[,c('sample','pLipids', 'pUnSaturated_Hydrocarbons', 'pCondensed_Hydrocarbons', 'pPeptides', 'pAmino_Sugars', 'pCarbohydrates', 'pPolyphenol', 'pCarboxylated_Oxygen_Rich')]
+
+# rename so it looks pretty
+colnames(subset_classes) <- c('sample','Lipid', 'UnSaturated_Hydrocarbon', 'Condensed_Hydrocarbon', 'Peptide', 'Amino_Sugar', 'Carbohydrate', 'Polyphenol', 'Carboxylated/Oxygen_Rich')
+
+# melt
+melted_df <- melt(subset_classes, id=1)
+```
+
+```{python}
+#add phenotypic data - I use python to add 'media' 'infection' to melted_df
+df3 = r.melted_df
+df3['media']=df3['sample'].str.split('_').str[0]
+df3['infection']=df3['sample'].str.split('_').str[1]
+df3['time']=df3['sample'].str.split('_').str[2]
+df3['media_infection']=df3['media']+' '+df3['infection']
+df3['sample1']=df3['media']+' '+df3['infection']+' '+df3['time']
+`````
+
+```{r}
+melted <- py$df3 #import file with phenotypic data
+
+#check for statistics
+shapiro.test(melted$value)  #wilcox since pval is less than 0.5 = non normally distributed
+
+#plot as needed, changing variables and filtering dataframe based on comparison 
+relA <- ggplot(melted, aes(x=media, y=value, fill=media)) + geom_boxplot() +
+        scale_fill_manual(values=alpha(c('darkgreen', 'darkslategrey'),0.9)) +
+        facet_wrap(~variable, scales = "free_y") +
+        stat_compare_means(method = "wilcox.test", aes(label = ..p.signif..), label.x = 1.4) +
+        theme_minimal() 
+relA
+```
+
